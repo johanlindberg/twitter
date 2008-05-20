@@ -213,11 +213,11 @@ the current buffer."
     (insert "\n\n")))
 
 (defun twitter-status-post ()
-  (interactive)
   "Update your Twitter status.
 The contents of the current buffer are used for the status. The
 current buffer is then killed. If there is too much text in the
 buffer then you will be asked for confirmation."
+  (interactive)
   (when (or (<= (buffer-size) twitter-maximum-status-length)
 	    (y-or-n-p (format (concat "The message is %i characters long. "
 				      "Are you sure? ") (buffer-size))))
@@ -237,11 +237,11 @@ buffer then you will be asked for confirmation."
     (message "Succesfully updated Twitter status.")))
 
 (defun twitter-status-edit ()
-  (interactive)
   "Edit your twitter status in a new buffer.
 A new buffer is popped up in a special edit mode. Press
 \\[twitter-status-post] when you are finished editing to send the
 message."
+  (interactive)
   (pop-to-buffer "*Twitter Status*")
   (twitter-status-edit-mode))
 
