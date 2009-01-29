@@ -3,7 +3,7 @@
 ;; Author: Neil Roberts
 ;; Keywords: twitter
 
-;; Copyright 2008 Neil Roberts
+;; Copyright 2008, 2009  Neil Roberts
 ;;
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -70,9 +70,28 @@ remaining drops to negative.")
   "http://twitter.com/statuses/friends_timeline.xml"
   "URL used to receive the friends timeline")
 
+(defconst twitter-replies-timeline-url
+  "http://twitter.com/statuses/replies.xml"
+  "URL used to receive the replies timeline")
+
 (defconst twitter-status-update-url
   "http://twitter.com/statuses/update.xml"
   "URL used to update Twitter status")
+
+(defconst twitter-month-map
+  '(("Jan" . 1)
+    ("Feb" . 2)
+    ("Mar" . 3)
+    ("Apr" . 4)
+    ("May" . 5)
+    ("Jun" . 6)
+    ("Jul" . 7)
+    ("Aug" . 8)
+    ("Sep" . 9)
+    ("Oct" . 10)
+    ("Nov" . 11)
+    ("Dec" . 12))
+  "Assoc list mapping month abbreviations to month numbers")
 
 (defcustom twitter-username nil
   "Username to use for connecting to Twitter.
@@ -91,6 +110,13 @@ If nil, you will be prompted."
   :type 'integer
   :group 'twitter)
 
+(defcustom twitter-include-replies nil
+  "Whether to include the replies list in your friends timeline.
+If t, the replies list will be merged and sorted with your
+friends timeline."
+  :type 'boolean
+  :group 'twitter)
+
 (defvar twitter-status-edit-remaining-length ""
   "Characters remaining in a Twitter status update.
 This is displayed in the mode line.")
@@ -107,7 +133,7 @@ This is displayed in the mode line.")
     map)
   "Keymap for `twitter-status-edit-mode'.")
 
-(defun twitter-retrieve-url (url cb)
+(defun twitter-retrieve-url (url cb &optional cbargs)
   "Wrapper around url-retrieve.
 Optionally sets the username and password if twitter-username and
 twitter-password are set."
@@ -120,17 +146,26 @@ twitter-password are set."
 					(base64-encode-string (concat twitter-username
 								      ":" twitter-password)))
 				  (cdr server-cons))))))
-  (url-retrieve url cb))
+  (url-retrieve url cb cbargs))
 
 (defun twitter-get-friends-timeline ()
   "Fetch and display the friends timeline.
 The results are formatted and displayed in a buffer called
-*Twitter friends timeline*"
+*Twitter friends timeline*
+
+If the variable `twitter-include-replies' is non-nil, the replies
+timeline will also be merged into the friends timeline and
+displayed."
   (interactive)
   (twitter-retrieve-url twitter-friends-timeline-url
-			'twitter-fetched-friends-timeline))
+			'twitter-fetched-friends-timeline
+                        (list (if twitter-include-replies
+                                  (list twitter-replies-timeline-url)
+                                nil)
+                              ;; next arg is list of status to merge
+                              nil)))
 
-(defun twitter-fetched-friends-timeline (status &rest cbargs)
+(defun twitter-fetched-friends-timeline (status other-urls status-list)
   "Callback handler for fetching the Twitter friends timeline."
   (let ((result-buffer (current-buffer)) doc)
     ;; Make sure the temporary results buffer is killed even if the
@@ -143,19 +178,29 @@ The results are formatted and displayed in a buffer called
 	  ;; Parse the rest of the document
 	  (setq doc (xml-parse-region (point) (point-max))))
       (kill-buffer result-buffer))
-    ;; Get a clean buffer to display the results
-    (let ((buf (get-buffer-create "*Twitter friends timeline*")))
-      (with-current-buffer buf
-	(let ((inhibit-read-only t))
-	  (erase-buffer)
-	  (kill-all-local-variables)
-	  ;; If the GET failed then display an error instead
-	  (if (plist-get status :error)
-	      (twitter-show-error doc)
-	    ;; Otherwise process each status node
-	    (mapcar 'twitter-format-status-node (xml-get-children (car doc) 'status))))
-	(goto-char (point-min)))
-      (view-buffer buf))))
+    ;; Merge the new list with the current list of statuses
+    (setq status-list (twitter-merge-status-lists status-list
+                                                  (xml-get-children (car doc)
+                                                                    'status)))
+    ;; If there's more URLs then start fetching those
+    (if other-urls
+        (twitter-retrieve-url (car other-urls)
+                              'twitter-fetched-friends-timeline
+                              (list (cdr other-urls) status-list))
+      ;; Otherwise display the results
+      ;; Get a clean buffer to display the results
+      (let ((buf (get-buffer-create "*Twitter friends timeline*")))
+        (with-current-buffer buf
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (kill-all-local-variables)
+            ;; If the GET failed then display an error instead
+            (if (plist-get status :error)
+                (twitter-show-error doc)
+              ;; Otherwise process each status node
+              (mapcar 'twitter-format-status-node status-list)))
+          (goto-char (point-min)))
+        (view-buffer buf)))))
 
 (defun twitter-get-node-text (node)
   "Return the text of XML node NODE.
@@ -211,6 +256,87 @@ the current buffer."
     (when (setq val (twitter-get-attrib-node status-node 'text))
       (fill-region (prog1 (point) (insert val)) (point)))
     (insert "\n\n")))
+
+(defun twitter-remove-duplicate-statuses (a b)
+  "Destrutively modifies A to removes statuses that are also in B.
+The new head of A is returned."
+  (let (last (na a) nb)
+    (while na
+      (setq nb b)
+      ;; Looking for a matching node in b
+      (if (catch 'found
+            (while nb
+              (if (string-equal (twitter-get-attrib-node (car na) 'id)
+                                (twitter-get-attrib-node (car nb) 'id))
+                  (throw 'found t))
+              (setq nb (cdr nb)))
+            nil)
+          ;; If we found one then skip this node
+          (if last
+              (setcdr last (cdr na))
+            (setq a (cdr na))))
+      (setq last na)
+      (setq na (cdr na))))
+  a)
+
+(defun twitter-merge-status-lists (a b)
+  "Merge the two twitter status lists.
+The lists should be just the status nodes from the parsed XML
+output. They are interleaved so that the resulting list is still
+sorted by time. Duplicate entries are removed. The resulting list
+is then returned."
+  ;; Remove duplicates from a
+  (setq a (twitter-remove-duplicate-statuses a b))
+
+  (let (result)
+    (while (cond ((null a) ; have we reached the end of a?
+                  ;; return result + b
+                  (setq result (nconc (nreverse result) b))
+                  nil)
+                 ((null b) ; have we reached the end of b?
+                  ;; return result + a
+                  (setq result (nconc (nreverse result) a))
+                  nil)
+                 ((twitter-status-time-lessp (car a) (car b))
+                  ;; choose b
+                  (push (car b) result)
+                  (setq b (cdr b))
+                  t)
+                 (t
+                  ;; choose a
+                  (push (car a) result)
+                  (setq a (cdr a))
+                  t)))
+    result))
+
+(defun twitter-status-time-lessp (a b)
+  "Return whether the time stamp of status node A is < B."
+  (time-less-p (twitter-time-to-number (twitter-get-attrib-node
+                                        a 'created_at))
+               (twitter-time-to-number (twitter-get-attrib-node
+                                        b 'created_at))))
+
+(defun twitter-time-to-time (time)
+  "Convert TIME to a number of seconds since some epoch."
+  (let ((case-fold-search t))
+    (if (null (string-match (concat "\\`[a-z]\\{3\\} "
+                                    "\\([a-z]\\{3\\}\\) "
+                                    "\\([0-9]\\{1,2\\}\\) "
+                                    "\\([0-9]\\{2\\}\\):"
+                                    "\\([0-9]\\{2\\}\\):"
+                                    "\\([0-9]\\{2\\}\\) "
+                                    "\\([+-][0-9]\\{2\\}\\)\\([0-9]\\{2\\}\\) "
+                                    "\\([0-9]\\{4\\}\\)\\'") time))
+        (error "Invalid time string: %s" time))
+    (encode-time (string-to-number (match-string 5 time))
+                 (string-to-number (match-string 4 time))
+                 (string-to-number (match-string 3 time))
+                 (string-to-number (match-string 2 time))
+                 (cdr (assoc (match-string 1 time) twitter-month-map))
+                 (string-to-number (match-string 8 time))
+                 (concat (match-string 6 time) ":" (match-string 7 time)))))
+
+(twitter-time-to-time "Thu Jan 29 22:03:45 +0000 2009")
 
 (defun twitter-status-get-string ()
    "Get the contents of the current buffer as a string.
