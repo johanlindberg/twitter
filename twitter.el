@@ -212,6 +212,18 @@ the current buffer."
       (fill-region (prog1 (point) (insert val)) (point)))
     (insert "\n\n")))
 
+(defun twitter-status-get-string ()
+   "Get the contents of the current buffer as a string.
+All groups of spaces in the string are replaced with a single
+space."
+   (let ((other-buffer (current-buffer)))
+     (with-temp-buffer
+       (insert-buffer-substring-no-properties other-buffer)
+       (goto-char (point-min))
+       (while (re-search-forward "[\n\t ]+" nil t)
+         (replace-match " " t t))
+       (buffer-substring (point-min) (point-max)))))
+
 (defun twitter-status-post ()
   "Update your Twitter status.
 The contents of the current buffer are used for the status. The
@@ -224,9 +236,10 @@ buffer then you will be asked for confirmation."
     (message "Sending status...")
     (let ((url-request-method "POST")
 	  (url-request-data (concat "status="
-				    (url-hexify-string (buffer-substring
-							(point-min) (point-max))))))
-      (twitter-retrieve-url twitter-status-update-url 'twitter-status-callback))))
+				    (url-hexify-string
+                                     (twitter-status-get-string)))))
+      (twitter-retrieve-url twitter-status-update-url
+                            'twitter-status-callback))))
 
 (defun twitter-status-callback (status)
   "Function called after Twitter status has been sent."
