@@ -311,10 +311,10 @@ is then returned."
 
 (defun twitter-status-time-lessp (a b)
   "Return whether the time stamp of status node A is < B."
-  (time-less-p (twitter-time-to-number (twitter-get-attrib-node
-                                        a 'created_at))
-               (twitter-time-to-number (twitter-get-attrib-node
-                                        b 'created_at))))
+  (time-less-p (twitter-time-to-time (twitter-get-attrib-node
+                                      a 'created_at))
+               (twitter-time-to-time (twitter-get-attrib-node
+                                      b 'created_at))))
 
 (defun twitter-time-to-time (time)
   "Convert TIME to a number of seconds since some epoch."
