@@ -117,6 +117,14 @@ friends timeline."
   :type 'boolean
   :group 'twitter)
 
+(defcustom twitter-status-source "twitterel"
+  "What to send as the source of status updates.
+The Twitter website will use this to display a message like:
+
+about 3 minutes ago from twitter.el."
+  :type 'string
+  :group 'twitter)
+
 (defvar twitter-status-edit-remaining-length ""
   "Characters remaining in a Twitter status update.
 This is displayed in the mode line.")
@@ -363,7 +371,10 @@ buffer then you will be asked for confirmation."
     (let ((url-request-method "POST")
 	  (url-request-data (concat "status="
 				    (url-hexify-string
-                                     (twitter-status-get-string)))))
+                                     (twitter-status-get-string))
+                                    "&source="
+                                    (url-hexify-string
+                                     twitter-status-source))))
       (twitter-retrieve-url twitter-status-update-url
                             'twitter-status-callback))))
 
