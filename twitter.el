@@ -274,8 +274,8 @@ The new head of A is returned."
           ;; If we found one then skip this node
           (if last
               (setcdr last (cdr na))
-            (setq a (cdr na))))
-      (setq last na)
+            (setq a (cdr na)))
+        (setq last na))
       (setq na (cdr na))))
   a)
 
