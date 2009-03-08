@@ -138,8 +138,13 @@ This is displayed in the mode line.")
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map text-mode-map)
     (define-key map "\C-c\C-c" 'twitter-status-post)
+    (define-key map "\C-c\C-k" 'twitter-kill-status-buffer)
     map)
   "Keymap for `twitter-status-edit-mode'.")
+
+(defvar twitter-frame-configuration nil
+  "Frame configuration from immediately before a twitter.el
+command is called")
 
 (defun twitter-retrieve-url (url cb &optional cbargs)
   "Wrapper around url-retrieve.
@@ -383,14 +388,22 @@ buffer then you will be asked for confirmation."
   (let ((errmsg (plist-get status :error)))
     (when errmsg
       (signal (car errmsg) (cdr errmsg)))
-    (kill-buffer "*Twitter Status*")
+    (twitter-kill-status-buffer)
     (message "Succesfully updated Twitter status.")))
+
+(defun twitter-kill-status-buffer ()
+  "Kill the *Twitter Status* buffer and restore the previous
+frame configuration."
+  (interactive)
+  (kill-buffer "*Twitter Status*")
+  (set-frame-configuration twitter-frame-configuration))
 
 (defun twitter-status-edit ()
   "Edit your twitter status in a new buffer.
 A new buffer is popped up in a special edit mode. Press
 \\[twitter-status-post] when you are finished editing to send the
 message."
+  (setq twitter-frame-configuration (current-frame-configuration))
   (interactive)
   (pop-to-buffer "*Twitter Status*")
   (twitter-status-edit-mode))
