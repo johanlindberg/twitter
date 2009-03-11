@@ -125,6 +125,23 @@ about 3 minutes ago from twitter.el."
   :type 'string
   :group 'twitter)
 
+(defcustom twitter-time-format nil
+  "Function or string describing the format to display time stamps in.
+If the value is a string it should be a format string with %
+characters and it will be passed to format-time-string.
+
+If the value is a function it will be called with a single
+argument which will be a two element list containing the high and
+low part of the number of seconds since epoch. The value can be
+converted to broken down time using decode-time.
+
+Otherwise the variable can be nil in which case the time string
+from Twitter will be displayed directly."
+  :type '(choice (const :tag "No translation" nil)
+                 string
+                 function)
+  :group 'twitter)
+
 (defvar twitter-status-edit-remaining-length ""
   "Characters remaining in a Twitter status update.
 This is displayed in the mode line.")
@@ -260,6 +277,12 @@ the current buffer."
       (when (setq val (twitter-get-attrib-node user-node 'name))
 	(insert (propertize val 'face 'twitter-user-name-face))))
     (when (setq val (twitter-get-attrib-node status-node 'created_at))
+      (cond ((stringp twitter-time-format)
+             (setq val (format-time-string twitter-time-format
+                                           (twitter-time-to-time val))))
+            ((functionp twitter-time-format)
+             (setq val (funcall twitter-time-format
+                                (twitter-time-to-time val)))))
       (when (< (+ (current-column) (length val)) fill-column)
 	(setq val (concat (make-string (- fill-column
 					  (+ (current-column) (length val))) ? )
