@@ -271,7 +271,7 @@ the current buffer."
     (insert "\n\n")))
 
 (defun twitter-remove-duplicate-statuses (a b)
-  "Destrutively modifies A to removes statuses that are also in B.
+  "Destructively modifies A to removes statuses that are also in B.
 The new head of A is returned."
   (let (last (na a) nb)
     (while na
