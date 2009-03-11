@@ -125,7 +125,7 @@ about 3 minutes ago from twitter.el."
   :type 'string
   :group 'twitter)
 
-(defcustom twitter-time-format nil
+(defcustom twitter-time-format twitter-format-time-for-display
   "Function or string describing the format to display time stamps in.
 If the value is a string it should be a format string with %
 characters and it will be passed to format-time-string.
@@ -267,6 +267,37 @@ will also be displayed."
 	(insert (twitter-get-node-text (car error-node)))
       (xml-print doc))))	
 
+(defun twitter-format-time-for-display (time)
+  "Convert TIME to a friendly human readable string.
+TIME should be a high/low pair as returned by encode-time."
+  ;; This is based on a similar function from Tweet
+  (let* ((now (current-time))
+         (age (subtract-time now time))
+         (age-days (- (time-to-days now) (time-to-days time))))
+    (if (or (< (car age) 0)
+            (>= (car age) 16) ; more than about 12 days
+            (>= age-days 7))
+        (format-time-string "%x at %H:%M" time)
+      (let* ((age-seconds (logior (lsh (car age) 16) (cadr age)))
+             (age-minutes (/ age-seconds 60))
+             (age-hours (/ age-minutes 60)))
+        (cond ((< age-seconds 60)
+               "Less than a minute ago")
+              ((<= age-minutes 1)
+               "About a minute ago")
+              ((< age-minutes 60)
+               (format "About %d minutes ago" age-minutes))
+              ((<= age-hours 1)
+               "About an hour ago")
+              ((< age-minutes 360)
+               (format "About %d hours ago" age-hours))
+              ((<= age-days 0)
+               (format-time-string "Today at %H:%M" time))
+              ((<= age-days 1)
+               (format-time-string "Yesterday at %H:%M" time))
+              (t
+               (format-time-string "Last %A at %H:%M" time)))))))
+          
 (defun twitter-format-status-node (status-node)
   "Insert the contents of a Twitter status node.
 The status is formatted with text properties and insterted into
