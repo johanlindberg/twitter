@@ -125,7 +125,7 @@ about 3 minutes ago from twitter.el."
   :type 'string
   :group 'twitter)
 
-(defcustom twitter-time-format twitter-format-time-for-display
+(defcustom twitter-time-format 'twitter-format-time-for-display
   "Function or string describing the format to display time stamps in.
 If the value is a string it should be a format string with %
 characters and it will be passed to format-time-string.
