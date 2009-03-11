@@ -349,8 +349,6 @@ is then returned."
                  (string-to-number (match-string 8 time))
                  (concat (match-string 6 time) ":" (match-string 7 time)))))
 
-(twitter-time-to-time "Thu Jan 29 22:03:45 +0000 2009")
-
 (defun twitter-status-get-string ()
    "Get the contents of the current buffer as a string.
 All groups of spaces in the string are replaced with a single
