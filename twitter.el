@@ -261,6 +261,22 @@ nil if it isn't found."
 	(twitter-get-node-text (car child))
       nil)))
 
+(defun twitter-reply-button-pressed (button)
+  "Sets up a status edit buffer using the info from the reply button.
+twitter-reply-status-id is set to the id of the status
+corresponding to the button so that it will be marked as a
+reply. The status' screen name is initially entered into the
+buffer."
+  (let ((status-screen-name (overlay-get button 'twitter-status-screen-name))
+        (status-id (overlay-get button 'twitter-status-id)))
+    (when (null status-screen-name)
+      (error "Missing screen name in status"))
+    (when (null status-id)
+      (error "Missing status id"))
+    (twitter-status-edit)
+    (setq twitter-reply-status-id status-id)
+    (insert "@" status-screen-name " ")))
+
 (defun twitter-show-error (doc)
   "Show a Twitter error message.
 DOC should be the XML parsed document returned in the error
@@ -310,7 +326,9 @@ TIME should be a high/low pair as returned by encode-time."
   "Insert the contents of a Twitter status node.
 The status is formatted with text properties and insterted into
 the current buffer."
-  (let ((user-node (xml-get-children status-node 'user)) val)
+  (let ((user-node (xml-get-children status-node 'user))
+        (time-fill-pos (- fill-column (length " reply")))
+        val)
     (when user-node
       (setq user-node (car user-node))
       (when (setq val (twitter-get-attrib-node user-node 'name))
@@ -322,11 +340,19 @@ the current buffer."
             ((functionp twitter-time-format)
              (setq val (funcall twitter-time-format
                                 (twitter-time-to-time val)))))
-      (when (< (+ (current-column) (length val)) fill-column)
-	(setq val (concat (make-string (- fill-column
+      (when (< (+ (current-column) (length val)) time-fill-pos)
+	(setq val (concat (make-string (- time-fill-pos
 					  (+ (current-column) (length val))) ? )
 			  val)))
       (insert (propertize val 'face 'twitter-time-stamp-face)))
+
+    (insert (propertize " reply" 'face 'twitter-header-face))
+    (make-button (- (point) (length "reply")) (point)
+                 'action 'twitter-reply-button-pressed
+                 'twitter-status-screen-name (twitter-get-attrib-node user-node
+                                                                      'screen_name)
+                 'twitter-status-id (twitter-get-attrib-node status-node 'id))
+      
     (insert "\n")
     (when (setq val (twitter-get-attrib-node status-node 'text))
       (fill-region (prog1 (point) (insert val)) (point)))
@@ -427,7 +453,11 @@ space."
   "Update your Twitter status.
 The contents of the current buffer are used for the status. The
 current buffer is then killed. If there is too much text in the
-buffer then you will be asked for confirmation."
+buffer then you will be asked for confirmation.
+
+If the twitter-reply-status-id variable is not nil then this will
+be sent to mark the status as a reply. The reply button on the
+status list automatically sets that varaible."
   (interactive)
   (when (or (<= (buffer-size) twitter-maximum-status-length)
 	    (y-or-n-p (format (concat "The message is %i characters long. "
@@ -440,6 +470,10 @@ buffer then you will be asked for confirmation."
                                     "&source="
                                     (url-hexify-string
                                      twitter-status-source))))
+      (when twitter-reply-status-id
+        (setq url-request-data (concat url-request-data
+                                       "&in_reply_to_status_id="
+                                       twitter-reply-status-id)))
       (twitter-retrieve-url twitter-status-update-url
                             'twitter-status-callback))))
 
@@ -523,6 +557,10 @@ character count on the mode line is updated."
   ;; Make a buffer-local reference to the overlay for overlong
   ;; messages
   (make-local-variable 'twitter-status-edit-overlay)
+  ;; A buffer local variable for the reply id. This is filled in when
+  ;; the reply button is pressed
+  (make-local-variable 'twitter-reply-status-id)
+  (setq twitter-reply-status-id nil)
   ;; Update the mode line immediatly
   (twitter-status-edit-update-length))
 
