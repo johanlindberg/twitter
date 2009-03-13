@@ -170,12 +170,15 @@ twitter-password are set."
   (when (and twitter-username twitter-password)
     (let ((server-cons
 	   (or (assoc "twitter.com:80" url-http-real-basic-auth-storage)
-	       (car (push (cons "twitter.com:80" nil) url-http-real-basic-auth-storage)))))
+	       (car (push (cons "twitter.com:80" nil)
+                          url-http-real-basic-auth-storage)))))
       (unless (assoc "Twitter API" server-cons)
-	(setcdr server-cons (cons (cons "Twitter API"
-					(base64-encode-string (concat twitter-username
-								      ":" twitter-password)))
-				  (cdr server-cons))))))
+	(setcdr server-cons
+                (cons (cons "Twitter API"
+                            (base64-encode-string
+                             (concat twitter-username
+                                     ":" twitter-password)))
+                      (cdr server-cons))))))
   (url-retrieve url cb cbargs))
 
 (defun twitter-get-friends-timeline ()
