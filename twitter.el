@@ -50,13 +50,18 @@
 (defgroup twitter-faces nil "Faces for displaying Twitter statuses"
   :group 'twitter)
 
+(defface twitter-header-face
+  '((t (:background "light gray")))
+  "base face for headers"
+  :group 'twitter-faces)
+
 (defface twitter-user-name-face
-  '((t (:weight bold :background "light gray")))
+  '((t (:weight bold :inherit twitter-header-face)))
   "face for user name headers"
   :group 'twitter-faces)
 
 (defface twitter-time-stamp-face
-  '((t (:slant italic :background "light gray")))
+  '((t (:slant italic :inherit twitter-header-face)))
   "face for time stamp headers"
   :group 'twitter-faces)
 
