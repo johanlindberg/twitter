@@ -35,9 +35,10 @@
 ;; Tell it your username and password by customizing the group
 ;; "twitter".
 
-;; you can view the statuses by pressing C-x t and you can start
-;; editing a message with M-x twitter-status-edit RET. Once the
-;; message is finished press C-c C-c to publish.
+;; You can view the statuses by pressing C-x t. While in the timeline
+;; buffer you can press C-c C-s to post a new status or C-c C-r to
+;; reply to the status at point. Once the message is finished press
+;; C-c C-c to publish.
 
 ;;; Code:
 (require 'url)
@@ -164,6 +165,14 @@ This is displayed in the mode line.")
     map)
   "Keymap for `twitter-status-edit-mode'.")
 
+(defvar twitter-timeline-view-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map text-mode-map)
+    (define-key map "\C-c\C-r" 'twitter-reply)
+    (define-key map "\C-c\C-s" 'twitter-status-edit)
+    map)
+  "Keymap for `twitter-timeline-view-mode'.")
+
 (defvar twitter-frame-configuration nil
   "Frame configuration from immediately before a twitter.el
 command is called")
@@ -237,8 +246,9 @@ displayed."
                 (twitter-show-error doc)
               ;; Otherwise process each status node
               (mapcar 'twitter-format-status-node status-list)))
-          (goto-char (point-min)))
-        (view-buffer buf)))))
+          (goto-char (point-min))
+          (twitter-timeline-view-mode))
+        (view-buffer buf 'kill-buffer)))))
 
 (defun twitter-get-node-text (node)
   "Return the text of XML node NODE.
@@ -262,13 +272,20 @@ nil if it isn't found."
       nil)))
 
 (defun twitter-reply-button-pressed (button)
-  "Sets up a status edit buffer using the info from the reply button.
+  "Calls twitter-reply for the position where BUTTON is."
+  (twitter-reply (overlay-start button)))
+
+(defun twitter-reply (pos)
+  "Sets up a status edit buffer to reply to the message at POS.
 twitter-reply-status-id is set to the id of the status
-corresponding to the button so that it will be marked as a
+corresponding to the status so that it will be marked as a
 reply. The status' screen name is initially entered into the
-buffer."
-  (let ((status-screen-name (overlay-get button 'twitter-status-screen-name))
-        (status-id (overlay-get button 'twitter-status-id)))
+buffer.
+
+When called interactively POS is set to point."
+  (interactive "d")
+  (let ((status-screen-name (get-text-property pos 'twitter-status-screen-name))
+        (status-id (get-text-property pos 'twitter-status-id)))
     (when (null status-screen-name)
       (error "Missing screen name in status"))
     (when (null status-id)
@@ -328,6 +345,7 @@ The status is formatted with text properties and insterted into
 the current buffer."
   (let ((user-node (xml-get-children status-node 'user))
         (time-fill-pos (- fill-column (length " reply")))
+        (status-begin (point))
         val)
     (when user-node
       (setq user-node (car user-node))
@@ -348,15 +366,16 @@ the current buffer."
 
     (insert (propertize " reply" 'face 'twitter-header-face))
     (make-button (- (point) (length "reply")) (point)
-                 'action 'twitter-reply-button-pressed
-                 'twitter-status-screen-name (twitter-get-attrib-node user-node
-                                                                      'screen_name)
-                 'twitter-status-id (twitter-get-attrib-node status-node 'id))
-      
+                 'action 'twitter-reply-button-pressed)
     (insert "\n")
     (when (setq val (twitter-get-attrib-node status-node 'text))
       (fill-region (prog1 (point) (insert val)) (point)))
-    (insert "\n\n")))
+    (insert "\n\n")
+    (add-text-properties status-begin (point)
+                         `(twitter-status-screen-name
+                           ,(twitter-get-attrib-node user-node 'screen_name)
+                           twitter-status-id
+                           ,(twitter-get-attrib-node status-node 'id)))))
 
 (defun twitter-remove-duplicate-statuses (a b)
   "Destructively modifies A to removes statuses that are also in B.
@@ -563,6 +582,10 @@ character count on the mode line is updated."
   (setq twitter-reply-status-id nil)
   ;; Update the mode line immediatly
   (twitter-status-edit-update-length))
+
+(define-derived-mode twitter-timeline-view-mode fundamental-mode
+  "Twitter Timeline"
+  "Major mode for viewing timelines from Twitter.")
 
 (provide 'twitter)
 
