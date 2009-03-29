@@ -148,6 +148,36 @@ from Twitter will be displayed directly."
                  function)
   :group 'twitter)
 
+(defcustom twitter-status-format
+  (concat (propertize "%-32n"
+                      'face 'twitter-user-name-face)
+          (propertize "%33t"
+                      'face 'twitter-time-stamp-face)
+          (propertize " %r"
+                      'face 'twitter-header-face)
+          "\n%M\n\n")
+  "Format string describing how to display twitter statuses.
+It should be a string containing '%' characters followed by one
+of the following commands:
+
+%n - the full name of the person posting the tweet.
+%t - the time the tweet was created. This gets formatted
+     according to twitter-time-format.
+%r - a reply button
+%m - the tweet's text
+%M - the tweet's text but filled with fill-region
+%% - a literal percent character
+
+Any other text is copied directly into the buffer. Text
+properties are preserved and the properties of the % markers will
+be applied to the resulting string.
+
+The marker can optionally be given a padding value after the %
+symbol. If the value is negative, the padding will be added to
+the right otherwise it will be added to the left."
+  :type 'string
+  :group 'twitter)
+
 (defvar twitter-status-edit-remaining-length ""
   "Characters remaining in a Twitter status update.
 This is displayed in the mode line.")
@@ -236,7 +266,9 @@ displayed."
                               (list (cdr other-urls) status-list))
       ;; Otherwise display the results
       ;; Get a clean buffer to display the results
-      (let ((buf (get-buffer-create "*Twitter friends timeline*")))
+      (let ((buf (get-buffer-create "*Twitter friends timeline*"))
+            (compiled-format (twitter-compile-format-string
+                              twitter-status-format)))
         (with-current-buffer buf
           (let ((inhibit-read-only t))
             (erase-buffer)
@@ -245,7 +277,10 @@ displayed."
             (if (plist-get status :error)
                 (twitter-show-error doc)
               ;; Otherwise process each status node
-              (mapcar 'twitter-format-status-node status-list)))
+              (while status-list
+                (twitter-format-status-node (car status-list)
+                                            compiled-format)
+                (setq status-list (cdr status-list)))))
           (goto-char (point-min))
           (twitter-timeline-view-mode))
         (view-buffer buf 'kill-buffer)))))
@@ -338,44 +373,116 @@ TIME should be a high/low pair as returned by encode-time."
                (format-time-string "Yesterday at %H:%M" time))
               (t
                (format-time-string "Last %A at %H:%M" time)))))))
-          
-(defun twitter-format-status-node (status-node)
-  "Insert the contents of a Twitter status node.
-The status is formatted with text properties and insterted into
-the current buffer."
-  (let ((user-node (xml-get-children status-node 'user))
-        (time-fill-pos (- fill-column (length " reply")))
-        (status-begin (point))
-        val)
-    (when user-node
-      (setq user-node (car user-node))
-      (when (setq val (twitter-get-attrib-node user-node 'name))
-	(insert (propertize val 'face 'twitter-user-name-face))))
-    (when (setq val (twitter-get-attrib-node status-node 'created_at))
-      (cond ((stringp twitter-time-format)
-             (setq val (format-time-string twitter-time-format
-                                           (twitter-time-to-time val))))
-            ((functionp twitter-time-format)
-             (setq val (funcall twitter-time-format
-                                (twitter-time-to-time val)))))
-      (when (< (+ (current-column) (length val)) time-fill-pos)
-	(setq val (concat (make-string (- time-fill-pos
-					  (+ (current-column) (length val))) ? )
-			  val)))
-      (insert (propertize val 'face 'twitter-time-stamp-face)))
 
-    (insert (propertize " reply" 'face 'twitter-header-face))
-    (make-button (- (point) (length "reply")) (point)
-                 'action 'twitter-reply-button-pressed)
-    (insert "\n")
-    (when (setq val (twitter-get-attrib-node status-node 'text))
-      (fill-region (prog1 (point) (insert val)) (point)))
-    (insert "\n\n")
-    (add-text-properties status-begin (point)
-                         `(twitter-status-screen-name
-                           ,(twitter-get-attrib-node user-node 'screen_name)
-                           twitter-status-id
-                           ,(twitter-get-attrib-node status-node 'id)))))
+(defun twitter-compile-format-string (format-string)
+  "Converts FORMAT-STRING into a list that is easier to scan.
+See twitter-status-format for a description of the format. The
+returned list contains elements that are one of the following:
+
+- A string. This should be inserted directly into the buffer.
+
+- A four element list like (RIGHT-PAD WIDTH COMMAND
+  PROPERTIES). RIGHT-PAD is t if the - flag was specified or nil
+  otherwise. WIDTH is the amount to pad the string to or nil if
+  no padding was specified. COMMAND is an integer representing
+  the character code for the command. PROPERTIES is a list of
+  text properties that should be applied to the resulting
+  string."
+  (let (parts last-point)
+    (with-temp-buffer
+      (insert format-string)
+      (goto-char (point-min))
+      (setq last-point (point))
+      (while (re-search-forward "%\\(-?\\)\\([0-9]*\\)\\([a-zA-Z%]\\)" nil t)
+        ;; Push the preceeding string (if any) to copy directly into
+        ;; the buffer
+        (when (> (match-beginning 0) last-point)
+          (push (buffer-substring last-point (match-beginning 0)) parts))
+        ;; Make the three element list describing the command
+        (push (list (> (match-end 1) (match-beginning 1)) ; is - flag given?
+                    (if (> (match-end 2) (match-beginning 2)) ; is width given?
+                        (string-to-number (match-string 2)) ; extract the width
+                      nil) ; otherwise set to nil
+                    ;; copy the single character for the command number directly
+                    (char-after (match-beginning 3))
+                    ;; extract all of the properties so they can be
+                    ;; copied into the final string
+                    (text-properties-at (match-beginning 0)))
+              parts)
+        ;; Move last point to the end of the last match
+        (setq last-point (match-end 0)))
+      ;; Add any trailing text
+      (when (< last-point (point-max))
+        (push (buffer-substring last-point (point-max)) parts)))
+    (nreverse parts)))
+
+(defun twitter-insert-status-part-for-command (status-node command)
+  "Extract the string for COMMAND from STATUS-NODE and insert.
+The command should be integer representing one of the characters
+supported by twitter-status-format."
+  (let ((user-node (car (xml-get-children status-node 'user))))
+    (cond ((= command ?t)
+           (let ((val (twitter-get-attrib-node status-node 'created_at)))
+             (when val
+               (cond ((stringp twitter-time-format)
+                      (insert (format-time-string twitter-time-format
+                                                  (twitter-time-to-time val))))
+                     ((functionp twitter-time-format)
+                      (insert (funcall twitter-time-format
+                                       (twitter-time-to-time val))))
+                     ((null twitter-time-format)
+                      (insert val))
+                     (t (error "Invalid value for twitter-time-format"))))))
+          ((= command ?n)
+           (when user-node
+             (insert (or (twitter-get-attrib-node user-node 'name) ""))))
+          ((= command ?r)
+           (insert-button "reply"
+                          'action 'twitter-reply-button-pressed))
+          ((or (= command ?m) (= command ?M))
+           (let ((val (twitter-get-attrib-node status-node 'text)))
+             (when val
+               (if (= command ?M)
+                   (fill-region (prog1 (point) (insert val)) (point))
+                 (insert val)))))
+          ((= command ?%)
+           (insert ?%))
+          (t (error "Unsupported format command '%c'" command)))))
+
+(defun twitter-format-status-node (status-node format)
+  "Insert the contents of a Twitter status node.
+The status is formatted with text properties according to FORMAT
+and insterted into the current buffer. FORMAT should be a
+compiled format string as returned by
+twitter-compile-format-string."
+  (let ((status-begin (point)))
+    (while format
+      (if (stringp (car format))
+          (insert (car format))
+        (let ((part-start (point))
+              (right-pad (caar format))
+              (padding (cadar format))
+              (command (caddar format))
+              (properties (nth 3 (car format))))
+          (twitter-insert-status-part-for-command status-node command)
+          (when (and padding
+                     (< (- (point) part-start) padding))
+            (setq padding (make-string
+                           (+ padding (- part-start (point))) ? ))
+            (if right-pad
+                (insert padding)
+              (let ((part-end (point)))
+                (goto-char part-start)
+                (insert padding)
+                (goto-char (+ part-end (length padding))))))
+          (add-text-properties part-start (point) properties)))
+      (setq format (cdr format)))
+    (let ((user-node (car (xml-get-children status-node 'user))))
+      (add-text-properties status-begin (point)
+                           `(twitter-status-screen-name
+                             ,(twitter-get-attrib-node user-node 'screen_name)
+                             twitter-status-id
+                             ,(twitter-get-attrib-node status-node 'id))))))
 
 (defun twitter-remove-duplicate-statuses (a b)
   "Destructively modifies A to removes statuses that are also in B.
