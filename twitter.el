@@ -156,16 +156,34 @@ from Twitter will be displayed directly."
           (propertize " %r"
                       'face 'twitter-header-face)
           "\n%M\n\n")
-  "Format string describing how to display twitter statuses.
+  "Format string describing how to display twitter statuses
 It should be a string containing '%' characters followed by one
 of the following commands:
 
-%n - the full name of the person posting the tweet.
+%n - the full name of the person posting the tweet
+%u - the screen name of the person posting the tweet
 %t - the time the tweet was created. This gets formatted
-     according to twitter-time-format.
+     according to twitter-time-format
 %r - a reply button
 %m - the tweet's text
 %M - the tweet's text but filled with fill-region
+%s - the name of the program used to send the tweet
+
+%i - the numeric id of the tweet
+%T - whether the tweet was truncated
+
+%U - the screen name of the person who the tweet was a reply to
+%R - the status id of the tweet that this is a reply to
+%S - the user id of the tweet that this is a reply to
+
+%I - the id of the user posting the tweet
+%l - the location of the user posting the tweet
+%d - a description of the user posting the tweet
+%A - a URL to the image for the person posting the tweet
+%L - a URL to the home page for the person posting the tweet
+%F - the number of followers of the person posting the tweet
+%P - whether posts from this user are protected
+
 %% - a literal percent character
 
 Any other text is copied directly into the buffer. Text
@@ -416,6 +434,26 @@ returned list contains elements that are one of the following:
         (push (buffer-substring last-point (point-max)) parts)))
     (nreverse parts)))
 
+(defconst twitter-status-commands
+  '((?i . id)
+    (?R . in_reply_to_status_id)
+    (?S . in_reply_to_user_id)
+    (?U . in_reply_to_screen_name)
+    (?T . truncated))
+  "Alist mapping format commands to XML nodes in the status element.")
+
+(defconst twitter-user-commands
+  '((?n . name)
+    (?u . screen_name)
+    (?I . id)
+    (?l . location)
+    (?d . description)
+    (?A . profile_image_url)
+    (?L . url)
+    (?F . followers_count)
+    (?P . protected))
+  "Alist mapping format commands to XML nodes in the user element.")
+
 (defun twitter-insert-status-part-for-command (status-node command)
   "Extract the string for COMMAND from STATUS-NODE and insert.
 The command should be integer representing one of the characters
@@ -433,9 +471,6 @@ supported by twitter-status-format."
                      ((null twitter-time-format)
                       (insert val))
                      (t (error "Invalid value for twitter-time-format"))))))
-          ((= command ?n)
-           (when user-node
-             (insert (or (twitter-get-attrib-node user-node 'name) ""))))
           ((= command ?r)
            (insert-button "reply"
                           'action 'twitter-reply-button-pressed))
@@ -445,9 +480,27 @@ supported by twitter-status-format."
                (if (= command ?M)
                    (fill-region (prog1 (point) (insert val)) (point))
                  (insert val)))))
+          ((= command ?s)
+           (let ((val (twitter-get-attrib-node status-node 'source)))
+             (when val
+               (with-temp-buffer
+                 (insert val)
+                 (setq val (twitter-get-node-text
+                            (car (xml-parse-region (point-min) (point-max))))))
+               (when val
+                 (insert val)))))
           ((= command ?%)
            (insert ?%))
-          (t (error "Unsupported format command '%c'" command)))))
+          (t
+           (let (val elem)
+             (cond ((setq elem (assoc command twitter-user-commands))
+                    (setq val (twitter-get-attrib-node
+                               user-node (cdr elem))))
+                   ((setq elem (assoc command twitter-status-commands))
+                    (setq val (twitter-get-attrib-node
+                               status-node (cdr elem)))))
+             (when val
+               (insert val)))))))
 
 (defun twitter-format-status-node (status-node format)
   "Insert the contents of a Twitter status node.
