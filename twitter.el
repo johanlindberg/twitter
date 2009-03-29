@@ -148,7 +148,7 @@ from Twitter will be displayed directly."
                  function)
   :group 'twitter)
 
-(defcustom twitter-status-format
+(defconst twitter-default-status-format
   (concat (propertize "%-32n"
                       'face 'twitter-user-name-face)
           (propertize "%33t"
@@ -156,6 +156,27 @@ from Twitter will be displayed directly."
           (propertize " %r"
                       'face 'twitter-header-face)
           "\n%M\n\n")
+  "The default status format.
+This can be set as the value for twitter-status-format to make it
+display the tweets with a long header line with the user's full
+name, time of posting and a reply button followed by the content
+of the tweet on a new line.")
+
+(defconst twitter-web-status-format
+  (concat (propertize "%u"
+                      'face 'twitter-user-name-face)
+          " %M\n"
+          (propertize "%t from %s"
+                      'face 'twitter-time-stamp-face)
+          "\n\n")
+  "A status format to appear more like the twitter website.
+This can be set as the value for twitter-status-format to make it
+display the tweets in a style similar to the twitter website. The
+screen name of the tweeter preceeds the message and the time and
+source is given on the next line.")
+
+(defcustom twitter-status-format
+  twitter-default-status-format
   "Format string describing how to display twitter statuses
 It should be a string containing '%' characters followed by one
 of the following commands:
@@ -193,7 +214,9 @@ be applied to the resulting string.
 The marker can optionally be given a padding value after the %
 symbol. If the value is negative, the padding will be added to
 the right otherwise it will be added to the left."
-  :type 'string
+  :type `(choice (const :tag "Default" ,twitter-default-status-format)
+                 (const :tag "Web" ,twitter-web-status-format)
+                 string)
   :group 'twitter)
 
 (defvar twitter-status-edit-remaining-length ""
