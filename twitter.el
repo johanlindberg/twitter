@@ -310,21 +310,29 @@ displayed."
       (let ((buf (get-buffer-create "*Twitter friends timeline*"))
             (compiled-format (twitter-compile-format-string
                               twitter-status-format)))
-        (with-current-buffer buf
-          (let ((inhibit-read-only t))
-            (erase-buffer)
-            (kill-all-local-variables)
-            ;; If the GET failed then display an error instead
-            (if (plist-get status :error)
-                (twitter-show-error doc)
-              ;; Otherwise process each status node
-              (while status-list
-                (twitter-format-status-node (car status-list)
-                                            compiled-format)
-                (setq status-list (cdr status-list)))))
-          (goto-char (point-min))
-          (twitter-timeline-view-mode))
+	(with-current-buffer buf
+	  (let ((inhibit-read-only t))
+	    (erase-buffer)
+	    (kill-all-local-variables)
+	    ;; If the GET failed then display an error instead
+	    (if (plist-get status :error)
+		(twitter-show-error doc)
+	      ;; Otherwise process each status node
+	      (while status-list
+		(twitter-format-status-node (car status-list)
+					    compiled-format)
+		(setq status-list (cdr status-list)))))
+	  (goto-char (point-min))
+	  (twitter-timeline-view-mode))
         (view-buffer buf 'kill-buffer)))))
+
+;; Angle brackets ("<" and ">") are entity-encoded.
+;; See Question 7) "Encoding affects status character count" at
+;; http://apiwiki.twitter.com/Things-Every-Developer-Should-Know
+(defun twitter-decode-entity-encoding (str)
+  (let (result)
+    (setq result (replace-regexp-in-string "&gt;" ">" str))
+    (setq result (replace-regexp-in-string "&lt;" "<" result))))
 
 (defun twitter-get-node-text (node)
   "Return the text of XML node NODE.
@@ -333,7 +341,7 @@ as a single string."
   (let (text-parts)
     (dolist (part (xml-node-children node))
       (when (stringp part)
-	(push part text-parts)))
+	(push (twitter-decode-entity-encoding part) text-parts)))
     (apply 'concat (nreverse text-parts))))
 
 (defun twitter-get-attrib-node (node attrib)
