@@ -30,6 +30,7 @@
 ;; (autoload 'twitter-get-friends-timeline "twitter" nil t)
 ;; (autoload 'twitter-status-edit "twitter" nil t)
 ;; (global-set-key "\C-xt" 'twitter-get-friends-timeline)
+;; (global-set-key "\C-xu" 'twitter-get-user-timeline) ; Figure out a better key-binding for this
 ;; (add-hook 'twitter-status-edit-mode-hook 'longlines-mode)
 
 ;; Tell it your username and password by customizing the group
@@ -75,6 +76,10 @@ remaining drops to negative.")
 (defconst twitter-friends-timeline-url
   "http://twitter.com/statuses/friends_timeline.xml"
   "URL used to receive the friends timeline")
+
+(defconst twitter-user-timeline-url-stub
+  "http://twitter.com/statuses/user_timeline/"
+  "URL-stub used to receive a user's timeline")
 
 (defconst twitter-replies-timeline-url
   "http://twitter.com/statuses/replies.xml"
@@ -265,6 +270,55 @@ twitter-password are set."
                                      ":" twitter-password)))
                       (cdr server-cons))))))
   (url-retrieve url cb cbargs))
+
+(defun twitter-get-user-timeline ()
+  "Fetch and display the user's timeline.
+The results are formatted and displayed in a buffer called
+*Twitter <user> timeline*"
+  (interactive)
+  (let (user _url)
+    (setq user (read-from-minibuffer "Twitter username: "))
+    (twitter-retrieve-url (concat twitter-user-timeline-url-stub user ".xml")
+			  'twitter-fetched-user-timeline
+			  (list user nil))))
+
+(defun twitter-fetched-user-timeline (status user status-list)
+  "Callback handler for fetching a Twitter user's timeline."
+  (let ((result-buffer (current-buffer)) doc)
+    ;; Make sure the temporary results buffer is killed even if the
+    ;; xml parsing raises an error
+    (unwind-protect
+	(progn
+	  ;; Skip the mime headers
+	  (goto-char (point-min))
+	  (re-search-forward "\n\n")
+	  ;; Parse the rest of the document
+	  (setq doc (xml-parse-region (point) (point-max))))
+      (kill-buffer result-buffer))
+    ;; Merge the new list with the current list of statuses
+    (setq status-list (twitter-merge-status-lists status-list
+                                                  (xml-get-children (car doc)
+                                                                    'status)))
+    ;; Display the results
+    ;; Get a clean buffer to display the results
+    (let ((buf (get-buffer-create (concat "*Twitter " user " timeline*")))
+	  (compiled-format (twitter-compile-format-string
+			    twitter-status-format)))
+      (with-current-buffer buf
+	(let ((inhibit-read-only t))
+	  (erase-buffer)
+	  (kill-all-local-variables)
+	  ;; If the GET failed then display an error instead
+	  (if (plist-get status :error)
+	      (twitter-show-error doc)
+	    ;; Otherwise process each status node
+	    (while status-list
+	      (twitter-format-status-node (car status-list)
+					  compiled-format)
+	      (setq status-list (cdr status-list)))))
+	(goto-char (point-min))
+	(twitter-timeline-view-mode))
+      (view-buffer buf 'kill-buffer))))
 
 (defun twitter-get-friends-timeline ()
   "Fetch and display the friends timeline.
