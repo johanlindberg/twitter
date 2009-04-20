@@ -30,7 +30,6 @@
 ;; (autoload 'twitter-get-friends-timeline "twitter" nil t)
 ;; (autoload 'twitter-status-edit "twitter" nil t)
 ;; (global-set-key "\C-xt" 'twitter-get-friends-timeline)
-;; (global-set-key "\C-xu" 'twitter-get-user-timeline) ; Figure out a better key-binding for this
 ;; (add-hook 'twitter-status-edit-mode-hook 'longlines-mode)
 
 ;; Tell it your username and password by customizing the group
@@ -39,7 +38,8 @@
 ;; You can view the statuses by pressing C-x t. While in the timeline
 ;; buffer you can press C-c C-s to post a new status or C-c C-r to
 ;; reply to the status at point. Once the message is finished press
-;; C-c C-c to publish.
+;; C-c C-c to publish. C-c C-u loads the timeline for the user at
+;; point. 
 
 ;;; Code:
 (require 'url)
@@ -246,6 +246,7 @@ This is displayed in the mode line.")
     (set-keymap-parent map text-mode-map)
     (define-key map "\C-c\C-r" 'twitter-reply)
     (define-key map "\C-c\C-s" 'twitter-status-edit)
+    (define-key map "\C-c\C-u" 'twitter-get-user-timeline)
     map)
   "Keymap for `twitter-timeline-view-mode'.")
 
@@ -271,13 +272,16 @@ twitter-password are set."
                       (cdr server-cons))))))
   (url-retrieve url cb cbargs))
 
-(defun twitter-get-user-timeline ()
+(defun twitter-get-user-timeline (pos)
   "Fetch and display the user's timeline.
 The results are formatted and displayed in a buffer called
 *Twitter <user> timeline*"
-  (interactive)
-  (let (user _url)
-    (setq user (read-from-minibuffer "Twitter username: "))
+  (interactive "d")
+  (let ((user nil)
+	(status-screen-name (get-text-property pos 'twitter-status-screen-name)))
+    (setq user (read-from-minibuffer (concat "Twitter username (" status-screen-name "): ")))
+    (when (equal user "")
+      (setq user status-screen-name))
     (twitter-retrieve-url (concat twitter-user-timeline-url-stub user ".xml")
 			  'twitter-fetched-user-timeline
 			  (list user nil))))
