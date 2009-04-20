@@ -38,8 +38,8 @@
 ;; You can view the statuses by pressing C-x t. While in the timeline
 ;; buffer you can press C-c C-s to post a new status or C-c C-r to
 ;; reply to the status at point. Once the message is finished press
-;; C-c C-c to publish. C-c C-u loads the timeline for the user at
-;; point. 
+;; C-c C-c to publish.
+;; C-c C-u loads a timeline for a user (defaults to user at point).
 
 ;;; Code:
 (require 'url)
