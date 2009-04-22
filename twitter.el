@@ -804,7 +804,7 @@ character count on the mode line is updated."
   (let ((post-size (buffer-size)))
     (replace-regexp-in-string "[<|>]"
                               #'(lambda (x)
-                                  (incf post-size 2) x)
+                                  (incf post-size 3) x)
                               (buffer-string))
     post-size))
 
