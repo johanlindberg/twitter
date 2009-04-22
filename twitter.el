@@ -727,9 +727,9 @@ If the twitter-reply-status-id variable is not nil then this will
 be sent to mark the status as a reply. The reply button on the
 status list automatically sets that varaible."
   (interactive)
-  (when (or (<= (buffer-size) twitter-maximum-status-length)
+  (when (or (<= (twitter-buffer-size) twitter-maximum-status-length)
 	    (y-or-n-p (format (concat "The message is %i characters long. "
-				      "Are you sure? ") (buffer-size))))
+				      "Are you sure? ") (twitter-buffer-size))))
     (message "Sending status...")
     (let ((url-request-method "POST")
 	  (url-request-data (concat "status="
@@ -778,7 +778,7 @@ hightlighted in the face twitter-status-overlong-face and the
 character count on the mode line is updated."
   ;; Update the remaining characters in the mode line
   (let ((remaining (- twitter-maximum-status-length
-		      (buffer-size))))
+		      (twitter-buffer-size))))
     (setq twitter-status-edit-remaining-length
 	  (concat " "
 		  (if (>= remaining 0)
@@ -788,7 +788,7 @@ character count on the mode line is updated."
 		  " ")))
   (force-mode-line-update)
   ;; Highlight the characters in the buffer that are over the limit
-  (if (> (buffer-size) twitter-maximum-status-length)
+  (if (> (twitter-buffer-size) twitter-maximum-status-length)
       (let ((start (+ (point-min) twitter-maximum-status-length)))
 	(if (null twitter-status-edit-overlay)
 	    (overlay-put (setq twitter-status-edit-overlay
@@ -799,6 +799,14 @@ character count on the mode line is updated."
     ;; Buffer is not too long so just hide the overlay
     (when twitter-status-edit-overlay
       (delete-overlay twitter-status-edit-overlay))))
+
+(defun twitter-buffer-size ()
+  (let ((post-size (buffer-size)))
+    (replace-regexp-in-string "[<|>]"
+                              #'(lambda (x)
+                                  (incf post-size 2) x)
+                              (buffer-string))
+    post-size))
 
 (defun twitter-status-edit-after-change (begin end old-size)
   (twitter-status-edit-update-length))
