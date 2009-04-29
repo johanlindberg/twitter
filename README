@@ -1,1 +1,9 @@
 This is a fork of git://git.busydoingnothing.co.uk/twitter.git
+
+TODO:
+1) User timeline view. DONE
+2) Search.
+3) Pagination. DONE
+4) Automatic refresh.
+5) Group (several, but not all, friends) timeline view.
+6) Visualize conversations.
