@@ -40,6 +40,8 @@
 ;; reply to the status at point. Once the message is finished press
 ;; C-c C-c to publish.
 ;; C-c C-u loads a timeline for a user (defaults to user at point).
+;; C-c C-<down> loads the next 20 tweets and
+;; C-c C-<up> loads the previous 20 tweets in the current timeline.
 
 ;;; Code:
 (require 'url)
@@ -247,8 +249,14 @@ This is displayed in the mode line.")
     (define-key map "\C-c\C-r" 'twitter-reply)
     (define-key map "\C-c\C-s" 'twitter-status-edit)
     (define-key map "\C-c\C-u" 'twitter-get-user-timeline)
+
+    (define-key map [?\C-c down] 'twitter-get-next-page)
+    (define-key map [?\C-c up] 'twitter-get-prev-page)
+
     map)
   "Keymap for `twitter-timeline-view-mode'.")
+
+(defvar twitter-current-page 1)
 
 (defvar twitter-frame-configuration nil
   "Frame configuration from immediately before a twitter.el
@@ -333,6 +341,7 @@ If the variable `twitter-include-replies' is non-nil, the replies
 timeline will also be merged into the friends timeline and
 displayed."
   (interactive)
+  (setq twitter-current-page 1)
   (twitter-retrieve-url twitter-friends-timeline-url
 			'twitter-fetched-friends-timeline
                         (list (if twitter-include-replies
@@ -383,6 +392,21 @@ displayed."
 	  (goto-char (point-min))
 	  (twitter-timeline-view-mode))
         (view-buffer buf 'kill-buffer)))))
+
+(defun twitter-get-next-page ()
+  (interactive)
+  (incf twitter-current-page)
+  (twitter-retrieve-url (concat twitter-friends-timeline-url "?page=" (number-to-string twitter-current-page))
+			'twitter-fetched-friends-timeline
+                        (list nil nil)))
+
+(defun twitter-get-prev-page ()
+  (interactive)
+  (when (> twitter-current-page 1)
+    (decf twitter-current-page)
+    (twitter-retrieve-url (concat twitter-friends-timeline-url "?page=" (number-to-string twitter-current-page))
+                          'twitter-fetched-friends-timeline
+                          (list nil nil))))
 
 ;; Angle brackets ("<" and ">") are entity-encoded.
 ;; See Question 7) "Encoding affects status character count" at
