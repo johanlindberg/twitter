@@ -39,9 +39,12 @@
 ;; buffer you can press C-c C-s to post a new status or C-c C-r to
 ;; reply to the status at point. Once the message is finished press
 ;; C-c C-c to publish.
-;; C-c C-u loads a timeline for a user (defaults to user at point).
+;;
+;; Additional features:
+;; C-c C-d loads the 20 most recent direct messages recieved.
+;; C-c C-u loads the 20 most recent statuses for a user (defaults to user at point).
 ;; C-c C-<down> loads the next 20 tweets and
-;; C-c C-<up> loads the previous 20 tweets in the current timeline.
+;; C-c C-<up> loads the previous 20 tweets in the friends timeline.
 
 ;;; Code:
 (require 'url)
@@ -79,9 +82,13 @@ remaining drops to negative.")
   "http://twitter.com/statuses/friends_timeline.xml"
   "URL used to receive the friends timeline")
 
+(defconst twitter-direct-messages-url
+  "http://twitter.com/direct_messages.xml"
+  "URL used to recieve the 20 most recent direct messages received")
+
 (defconst twitter-user-timeline-url-stub
   "http://twitter.com/statuses/user_timeline/"
-  "URL-stub used to receive a user's timeline")
+  "URL-stub used to recieve the 20 most recent statuses posted by a user")
 
 (defconst twitter-replies-timeline-url
   "http://twitter.com/statuses/replies.xml"
@@ -226,6 +233,15 @@ the right otherwise it will be added to the left."
                  string)
   :group 'twitter)
 
+(defconst twitter-direct-message-format
+  (concat (propertize "%-38n"
+                      'face 'twitter-user-name-face)
+          (propertize "%33t"
+                      'face 'twitter-time-stamp-face)
+          "\n%M\n\n")
+  "The direct message format.
+Based on the twitter-default-status-format.")
+
 (defvar twitter-status-edit-remaining-length ""
   "Characters remaining in a Twitter status update.
 This is displayed in the mode line.")
@@ -249,6 +265,7 @@ This is displayed in the mode line.")
     (define-key map "\C-c\C-r" 'twitter-reply)
     (define-key map "\C-c\C-s" 'twitter-status-edit)
     (define-key map "\C-c\C-u" 'twitter-get-user-timeline)
+    (define-key map "\C-c\C-d" 'twitter-get-direct-messages)
 
     (define-key map [?\C-c down] 'twitter-get-next-page)
     (define-key map [?\C-c up] 'twitter-get-prev-page)
@@ -280,6 +297,54 @@ twitter-password are set."
                       (cdr server-cons))))))
   (url-retrieve url cb cbargs))
 
+(defun twitter-get-direct-messages ()
+  "Fetch and display the user's direct messages."
+  (interactive)
+  (twitter-retrieve-url twitter-direct-messages-url
+                        'twitter-fetched-direct-messages
+                        (list nil)))
+
+(defun twitter-fetched-direct-messages (status status-list)
+  "Callback handler for fetching the user's direct messages."
+  (let ((result-buffer (current-buffer)) doc)
+    ;; Make sure the temporary results buffer is killed even if the
+    ;; xml parsing raises an error
+    (unwind-protect
+	(progn
+	  ;; Skip the mime headers
+	  (goto-char (point-min))
+	  (re-search-forward "\n\n")
+	  ;; Parse the rest of the document
+	  (setq doc (xml-parse-region (point) (point-max))))
+     (kill-buffer result-buffer))
+
+    (message "%s" doc)
+
+    ;; Merge the new list with the current list of statuses
+    (setq status-list (twitter-merge-status-lists status-list
+                                                  (xml-get-children (car doc)
+                                                                    'direct_message)))
+    ;; Display the results
+    ;; Get a clean buffer to display the results
+    (let ((buf (get-buffer-create (concat "*Twitter direct messages*")))
+	  (compiled-format (twitter-compile-format-string
+			    twitter-direct-message-format)))
+      (with-current-buffer buf
+	(let ((inhibit-read-only t))
+	  (erase-buffer)
+	  (kill-all-local-variables)
+	  ;; If the GET failed then display an error instead
+	  (if (plist-get status :error)
+	      (twitter-show-error doc)
+	    ;; Otherwise process each status node
+	    (while status-list
+	      (twitter-format-direct-message-node (car status-list)
+					  compiled-format)
+	      (setq status-list (cdr status-list)))))
+	(goto-char (point-min))
+	(twitter-timeline-view-mode))
+      (view-buffer buf 'kill-buffer))))
+
 (defun twitter-get-user-timeline (pos)
   "Fetch and display the user's timeline.
 The results are formatted and displayed in a buffer called
@@ -307,6 +372,7 @@ The results are formatted and displayed in a buffer called
 	  ;; Parse the rest of the document
 	  (setq doc (xml-parse-region (point) (point-max))))
       (kill-buffer result-buffer))
+
     ;; Merge the new list with the current list of statuses
     (setq status-list (twitter-merge-status-lists status-list
                                                   (xml-get-children (car doc)
@@ -363,6 +429,7 @@ displayed."
 	  ;; Parse the rest of the document
 	  (setq doc (xml-parse-region (point) (point-max))))
       (kill-buffer result-buffer))
+
     ;; Merge the new list with the current list of statuses
     (setq status-list (twitter-merge-status-lists status-list
                                                   (xml-get-children (car doc)
@@ -649,6 +716,85 @@ twitter-compile-format-string."
                              ,(twitter-get-attrib-node user-node 'screen_name)
                              twitter-status-id
                              ,(twitter-get-attrib-node status-node 'id))))))
+
+(defun twitter-insert-direct-message-part-for-command (direct-message-node command)
+  "Extract the string for COMMAND from DIRECT-MESSAGE-NODE and insert.
+The command should be integer representing one of the characters
+supported by twitter-direct-message-format."
+  (let ((sender-node (car (xml-get-children direct-message-node 'sender))))
+    (cond ((= command ?t)
+           (let ((val (twitter-get-attrib-node direct-message-node 'created_at)))
+             (when val
+               (cond ((stringp twitter-time-format)
+                      (insert (format-time-string twitter-time-format
+                                                  (twitter-time-to-time val))))
+                     ((functionp twitter-time-format)
+                      (insert (funcall twitter-time-format
+                                       (twitter-time-to-time val))))
+                     ((null twitter-time-format)
+                      (insert val))
+                     (t (error "Invalid value for twitter-time-format"))))))
+          ((= command ?r)
+           (insert-button "reply"
+                          'action 'twitter-reply-button-pressed))
+          ((or (= command ?m) (= command ?M))
+           (let ((val (twitter-get-attrib-node direct-message-node 'text)))
+             (when val
+               (if (= command ?M)
+                   (fill-region (prog1 (point) (insert val)) (point))
+                 (insert val)))))
+          ((= command ?s)
+           (let ((val (twitter-get-attrib-node direct-message-node 'source)))
+             (when val
+               (with-temp-buffer
+                 (insert val)
+                 (setq val (twitter-get-node-text
+                            (car (xml-parse-region (point-min) (point-max))))))
+               (when val
+                 (insert val)))))
+          ((= command ?%)
+           (insert ?%))
+          (t
+           (let (val elem)
+             (cond ((setq elem (assoc command twitter-user-commands))
+                    (setq val (twitter-get-attrib-node
+                               sender-node (cdr elem))))
+                   ((setq elem (assoc command twitter-status-commands))
+                    (setq val (twitter-get-attrib-node
+                               direct-message-node (cdr elem)))))
+             (when val
+               (insert val)))))))
+
+(defun twitter-format-direct-message-node (direct-message-node format)
+  "Insert the contents of a Twitter direct message node."
+  (let ((direct-message-begin (point)))
+    (while format
+      (if (stringp (car format))
+          (insert (car format))
+        (let ((part-start (point))
+              (right-pad (caar format))
+              (padding (cadar format))
+              (command (caddar format))
+              (properties (nth 3 (car format))))
+          (twitter-insert-direct-message-part-for-command direct-message-node command)
+          (when (and padding
+                     (< (- (point) part-start) padding))
+            (setq padding (make-string
+                           (+ padding (- part-start (point))) ? ))
+            (if right-pad
+                (insert padding)
+              (let ((part-end (point)))
+                (goto-char part-start)
+                (insert padding)
+                (goto-char (+ part-end (length padding))))))
+          (add-text-properties part-start (point) properties)))
+      (setq format (cdr format)))
+    (let ((sender-node (car (xml-get-children direct-message-node 'sender))))
+      (add-text-properties direct-message-begin (point)
+                           `(twitter-sender-screen-name
+                             ,(twitter-get-attrib-node sender-node 'screen_name)
+                             twitter-direct-message-id
+                             ,(twitter-get-attrib-node direct-message-node 'id))))))
 
 (defun twitter-remove-duplicate-statuses (a b)
   "Destructively modifies A to removes statuses that are also in B.
