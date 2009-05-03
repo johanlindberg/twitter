@@ -162,6 +162,16 @@ from Twitter will be displayed directly."
                  function)
   :group 'twitter)
 
+(defconst twitter-default-and-screennames-status-format
+  (concat (propertize "%-20u %-19n"
+                      'face 'twitter-user-name-face)
+          (propertize " %24t"
+                      'face 'twitter-time-stamp-face)
+          (propertize " %r"
+                      'face 'twitter-header-face)
+          "\n%M\n\n")
+  "The default status format + screen names.")
+
 (defconst twitter-default-status-format
   (concat (propertize "%-32n"
                       'face 'twitter-user-name-face)
@@ -230,6 +240,7 @@ symbol. If the value is negative, the padding will be added to
 the right otherwise it will be added to the left."
   :type `(choice (const :tag "Default" ,twitter-default-status-format)
                  (const :tag "Web" ,twitter-web-status-format)
+                 (const :tag "Default+ screen names" ,twitter-default-and-screennames-status-format)
                  string)
   :group 'twitter)
 
