@@ -36,7 +36,7 @@
 ;; "twitter".
 
 ;; You can view the statuses by pressing C-x t. While in the timeline
-;; buffer you can press C-c C-s to post a new status or C-c C-r to
+;; buffer you can press C-c C-p to post a new status or C-c C-r to
 ;; reply to the status at point. Once the message is finished press
 ;; C-c C-c to publish.
 ;;
@@ -274,7 +274,7 @@ This is displayed in the mode line.")
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map text-mode-map)
     (define-key map "\C-c\C-r" 'twitter-reply)
-    (define-key map "\C-c\C-s" 'twitter-status-edit)
+    (define-key map "\C-c\C-p" 'twitter-status-edit)
     (define-key map "\C-c\C-u" 'twitter-get-user-timeline)
     (define-key map "\C-c\C-d" 'twitter-get-direct-messages)
 
