@@ -41,10 +41,14 @@
 ;; C-c C-c to publish.
 ;;
 ;; Additional features:
-;; C-c C-d loads the 20 most recent direct messages recieved.
-;; C-c C-u loads the 20 most recent statuses for a user (defaults to user at point).
+;; C-c C-d loads the 20 + 20 most recent direct messages sent and
+;; recieved. Pressing C-c C-p in this buffer opens a buffer for
+;; writing a direct message to a user (it defaults to the user at
+;; point). Pressing C-c C-c sends it.
+;; C-c C-u loads the 20 most recent statuses for a user (defaults to
+;; user at point).
 ;; C-c C-<down> loads the next 20 tweets and
-;; C-c C-<up> loads the previous 20 tweets in the friends timeline.
+;; C-c C-<up> loads the previous 20 tweets in the current timeline.
 
 ;;; Code:
 (require 'url)
@@ -85,6 +89,14 @@ remaining drops to negative.")
 (defconst twitter-direct-messages-url
   "http://twitter.com/direct_messages.xml"
   "URL used to recieve the 20 most recent direct messages received")
+
+(defconst twitter-sent-direct-messages-url
+  "http://twitter.com/direct_messages/sent.xml"
+  "URL used to recieve the 20 most recently sent direct messages")
+
+(defconst twitter-new-direct-message-url
+  "http://twitter.com/direct_messages/new.xml"
+  "URL used to send a new direct message")
 
 (defconst twitter-user-timeline-url-stub
   "http://twitter.com/statuses/user_timeline/"
@@ -244,15 +256,6 @@ the right otherwise it will be added to the left."
                  string)
   :group 'twitter)
 
-(defconst twitter-direct-message-format
-  (concat (propertize "%-38n"
-                      'face 'twitter-user-name-face)
-          (propertize "%33t"
-                      'face 'twitter-time-stamp-face)
-          "\n%M\n\n")
-  "The direct message format.
-Based on the twitter-default-status-format.")
-
 (defvar twitter-status-edit-remaining-length ""
   "Characters remaining in a Twitter status update.
 This is displayed in the mode line.")
@@ -262,6 +265,9 @@ This is displayed in the mode line.")
 (defvar twitter-status-edit-overlay nil
   "Overlay used to highlight overlong status messages.")
 
+(defvar twitter-direct-message-edit-overlay nil
+  "Overlay used to highlight overlong direct messages.")
+
 (defvar twitter-status-edit-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map text-mode-map)
@@ -269,6 +275,14 @@ This is displayed in the mode line.")
     (define-key map "\C-c\C-k" 'twitter-kill-status-buffer)
     map)
   "Keymap for `twitter-status-edit-mode'.")
+
+(defvar twitter-direct-message-edit-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map text-mode-map)
+    (define-key map "\C-c\C-c" 'twitter-direct-message-post)
+    (define-key map "\C-c\C-k" 'twitter-kill-direct-message-buffer)
+    map)
+  "Keymap for `twitter-direct-message-edit-mode'.")
 
 (defvar twitter-timeline-view-mode-map
   (let ((map (make-sparse-keymap)))
@@ -284,7 +298,22 @@ This is displayed in the mode line.")
     map)
   "Keymap for `twitter-timeline-view-mode'.")
 
+(defvar twitter-direct-message-view-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map text-mode-map)
+    (define-key map "\C-c\C-r" 'twitter-reply-direct-message)
+    (define-key map "\C-c\C-p" 'twitter-direct-message-edit)
+    (define-key map "\C-c\C-u" 'twitter-get-user-timeline)
+    (define-key map "\C-c\C-d" 'twitter-get-direct-messages)
+
+    (define-key map [?\C-c down] 'twitter-get-next-page-direct-messages)
+    (define-key map [?\C-c up] 'twitter-get-prev-page-direct-messages)
+
+    map)
+  "Keymap for `twitter-direct-message-view-mode'.")
+
 (defvar twitter-current-page 1)
+(defvar twitter-direct-message-current-page 1)
 
 (defvar twitter-frame-configuration nil
   "Frame configuration from immediately before a twitter.el
@@ -306,16 +335,18 @@ twitter-password are set."
                              (concat twitter-username
                                      ":" twitter-password)))
                       (cdr server-cons))))))
+;  (message "%s %s %s" url cb cbargs)
   (url-retrieve url cb cbargs))
 
 (defun twitter-get-direct-messages ()
   "Fetch and display the user's direct messages."
   (interactive)
+  (setq twitter-direct-message-current-page 1)
   (twitter-retrieve-url twitter-direct-messages-url
                         'twitter-fetched-direct-messages
-                        (list nil)))
+                        (list (list twitter-sent-direct-messages-url) nil)))
 
-(defun twitter-fetched-direct-messages (status status-list)
+(defun twitter-fetched-direct-messages (status other-urls status-list)
   "Callback handler for fetching the user's direct messages."
   (let ((result-buffer (current-buffer)) doc)
     ;; Make sure the temporary results buffer is killed even if the
@@ -329,32 +360,34 @@ twitter-password are set."
 	  (setq doc (xml-parse-region (point) (point-max))))
      (kill-buffer result-buffer))
 
-    (message "%s" doc)
-
     ;; Merge the new list with the current list of statuses
     (setq status-list (twitter-merge-status-lists status-list
                                                   (xml-get-children (car doc)
                                                                     'direct_message)))
-    ;; Display the results
-    ;; Get a clean buffer to display the results
-    (let ((buf (get-buffer-create (concat "*Twitter direct messages*")))
-	  (compiled-format (twitter-compile-format-string
-			    twitter-direct-message-format)))
-      (with-current-buffer buf
-	(let ((inhibit-read-only t))
-	  (erase-buffer)
-	  (kill-all-local-variables)
-	  ;; If the GET failed then display an error instead
-	  (if (plist-get status :error)
-	      (twitter-show-error doc)
-	    ;; Otherwise process each status node
-	    (while status-list
-	      (twitter-format-direct-message-node (car status-list)
-					  compiled-format)
-	      (setq status-list (cdr status-list)))))
-	(goto-char (point-min))
-	(twitter-timeline-view-mode))
-      (view-buffer buf 'kill-buffer))))
+    (if other-urls
+        (twitter-retrieve-url (car other-urls)
+                              'twitter-fetched-direct-messages
+                              (list (cdr other-urls) status-list))
+      ;; Display the results
+      ;; Get a clean buffer to display the results
+      (let ((buf (get-buffer-create "*Twitter direct messages*"))
+            (compiled-format (twitter-compile-format-string
+                              twitter-status-format)))
+        (with-current-buffer buf
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (kill-all-local-variables)
+            ;; If the GET failed then display an error instead
+            (if (plist-get status :error)
+                (twitter-show-error doc)
+              ;; Otherwise process each status node
+              (while status-list
+                (twitter-format-direct-message-node (car status-list)
+                                                    compiled-format)
+                (setq status-list (cdr status-list)))))
+          (goto-char (point-min))
+          (twitter-direct-message-view-mode))
+        (view-buffer buf 'kill-buffer)))))
 
 (defun twitter-get-user-timeline (pos)
   "Fetch and display the user's timeline.
@@ -474,17 +507,52 @@ displayed."
 (defun twitter-get-next-page ()
   (interactive)
   (incf twitter-current-page)
-  (twitter-retrieve-url (concat twitter-friends-timeline-url "?page=" (number-to-string twitter-current-page))
+  (twitter-retrieve-url (concat twitter-friends-timeline-url
+                                "?page="
+                                (number-to-string twitter-current-page))
 			'twitter-fetched-friends-timeline
-                        (list nil nil)))
+                        (list (if twitter-include-replies
+                                  (list twitter-replies-timeline-url)
+                                nil)
+                              nil)))
 
 (defun twitter-get-prev-page ()
   (interactive)
   (when (> twitter-current-page 1)
     (decf twitter-current-page)
-    (twitter-retrieve-url (concat twitter-friends-timeline-url "?page=" (number-to-string twitter-current-page))
+    (twitter-retrieve-url (concat twitter-friends-timeline-url
+                                  "?page="
+                                  (number-to-string twitter-current-page))
                           'twitter-fetched-friends-timeline
-                          (list nil nil))))
+                          (list (if twitter-include-replies
+                                    (list twitter-replies-timeline-url)
+                                  nil)
+                                nil))))
+
+(defun twitter-get-next-page-direct-messages ()
+  (interactive)
+  (incf twitter-direct-message-current-page)
+  (twitter-retrieve-url (concat twitter-direct-messages-url
+                                "?page="
+                                (number-to-string twitter-direct-message-current-page))
+			'twitter-fetched-direct-messages
+                        (list (concat twitter-direct-messages-url
+                                      "?page="
+                                      (number-to-string twitter-direct-message-current-page))
+                              nil)))
+
+(defun twitter-get-prev-page-direct-messages ()
+  (interactive)
+  (when (> twitter-direct-message-current-page 1)
+    (decf twitter-direct-message-current-page)
+    (twitter-retrieve-url (concat twitter-direct-messages-url
+                                  "?page="
+                                  (number-to-string twitter-direct-message-current-page))
+                          'twitter-fetched-direct-messages
+                          (list (concat twitter-direct-messages-url
+                                        "?page="
+                                        (number-to-string twitter-direct-message-current-page))
+                                nil))))
 
 ;; Angle brackets ("<" and ">") are entity-encoded.
 ;; See Question 7) "Encoding affects status character count" at
@@ -519,6 +587,10 @@ nil if it isn't found."
   "Calls twitter-reply for the position where BUTTON is."
   (twitter-reply (overlay-start button)))
 
+(defun twitter-direct-message-reply-button-pressed (button)
+  "Calls twitter-reply for the position where BUTTON is."
+  (twitter-reply-direct-message (overlay-start button)))
+
 (defun twitter-reply (pos)
   "Sets up a status edit buffer to reply to the message at POS.
 twitter-reply-status-id is set to the id of the status
@@ -537,6 +609,14 @@ When called interactively POS is set to point."
     (twitter-status-edit)
     (setq twitter-reply-status-id status-id)
     (insert "@" status-screen-name " ")))
+
+(defun twitter-reply-direct-message (pos)
+  "Sets up a direct message edit buffer to reply to the user at POS."
+  (interactive "d")
+  (setq twitter-direct-message-recipient (get-text-property pos 'twitter-sender-screen-name))
+  (when (null twitter-direct-message-recipient)
+    (error "Missing screen name in status"))
+  (twitter-direct-message-edit))
 
 (defun twitter-show-error (doc)
   "Show a Twitter error message.
@@ -747,7 +827,7 @@ supported by twitter-direct-message-format."
                      (t (error "Invalid value for twitter-time-format"))))))
           ((= command ?r)
            (insert-button "reply"
-                          'action 'twitter-reply-button-pressed))
+                          'action 'twitter-direct-message-reply-button-pressed))
           ((or (= command ?m) (= command ?M))
            (let ((val (twitter-get-attrib-node direct-message-node 'text)))
              (when val
@@ -926,6 +1006,25 @@ status list automatically sets that varaible."
       (twitter-retrieve-url twitter-status-update-url
                             'twitter-status-callback))))
 
+(defun twitter-direct-message-post ()
+  "Send a direct message.
+The contents of the current buffer are used for the message. The
+current buffer is then killed. If there is too much text in the
+buffer then you will be asked for confirmation."
+  (interactive)
+  (when (or (<= (twitter-buffer-size) twitter-maximum-status-length)
+	    (y-or-n-p (format (concat "The message is %i characters long. "
+				      "Are you sure? ") (twitter-buffer-size))))
+    (message "Sending direct message...")
+    (let ((url-request-method "POST")
+	  (url-request-data (concat "text="
+				    (url-hexify-string
+                                     (twitter-status-get-string))
+                                    "&user="
+                                    twitter-direct-message-recipient)))
+      (twitter-retrieve-url twitter-new-direct-message-url
+                            'twitter-direct-message-callback))))
+
 (defun twitter-status-callback (status)
   "Function called after Twitter status has been sent."
   (let ((errmsg (plist-get status :error)))
@@ -934,11 +1033,26 @@ status list automatically sets that varaible."
     (twitter-kill-status-buffer)
     (message "Succesfully updated Twitter status.")))
 
+(defun twitter-direct-message-callback (message)
+  "Function called after a direct message has been sent."
+  (let ((errmsg (plist-get message :error)))
+    (when errmsg
+      (signal (car errmsg) (cdr errmsg)))
+    (twitter-kill-direct-message-buffer)
+    (message "Succesfully sent direct message.")))
+
 (defun twitter-kill-status-buffer ()
   "Kill the *Twitter Status* buffer and restore the previous
 frame configuration."
   (interactive)
   (kill-buffer "*Twitter Status*")
+  (set-frame-configuration twitter-frame-configuration))
+
+(defun twitter-kill-direct-message-buffer ()
+  "Kill the *Twitter Direct Message* buffer and restore the previous
+frame configuration."
+  (interactive)
+  (kill-buffer "*Twitter Direct Message*")
   (set-frame-configuration twitter-frame-configuration))
 
 (defun twitter-status-edit ()
@@ -950,6 +1064,16 @@ message."
   (interactive)
   (pop-to-buffer "*Twitter Status*")
   (twitter-status-edit-mode))
+
+(defun twitter-direct-message-edit ()
+  "Edit your direct message in a new buffer.
+A new buffer is popped up in a special edit mode. Press
+\\[twitter-direct-message-post] when you are finished editing to send the
+message."
+  (setq twitter-frame-configuration (current-frame-configuration))
+  (interactive)
+  (pop-to-buffer "*Twitter Direct Message*")
+  (twitter-direct-message-edit-mode))
 
 (defun twitter-status-edit-update-length ()
   "Updates the character count in Twitter status buffers.
@@ -981,6 +1105,36 @@ character count on the mode line is updated."
     (when twitter-status-edit-overlay
       (delete-overlay twitter-status-edit-overlay))))
 
+(defun twitter-direct-message-edit-update-length ()
+  "Updates the character count in Twitter direct message buffers.
+This should be run after the text in the buffer is changed. Any
+characters after the maximum status update length are
+hightlighted in the face twitter-status-overlong-face and the
+character count on the mode line is updated."
+  ;; Update the remaining characters in the mode line
+  (let ((remaining (- twitter-maximum-status-length
+		      (twitter-buffer-size))))
+    (setq twitter-direct-message-edit-remaining-length
+	  (concat " "
+		  (if (>= remaining 0)
+		      (number-to-string remaining)
+		    (propertize (number-to-string remaining)
+				'face 'twitter-status-overlong-face))
+		  " ")))
+  (force-mode-line-update)
+  ;; Highlight the characters in the buffer that are over the limit
+  (if (> (twitter-buffer-size) twitter-maximum-status-length)
+      (let ((start (+ (point-min) twitter-maximum-status-length)))
+	(if (null twitter-direct-message-edit-overlay)
+	    (overlay-put (setq twitter-direct-message-edit-overlay
+			       (make-overlay start (point-max)))
+			 'face 'twitter-status-overong-face)
+	  (move-overlay twitter-direct-message-edit-overlay
+			start (point-max))))
+    ;; Buffer is not too long so just hide the overlay
+    (when twitter-direct-message-edit-overlay
+      (delete-overlay twitter-direct-message-edit-overlay))))
+
 (defun twitter-buffer-size ()
   (let ((post-size (buffer-size)))
     (replace-regexp-in-string "[<|>]"
@@ -991,6 +1145,9 @@ character count on the mode line is updated."
 
 (defun twitter-status-edit-after-change (begin end old-size)
   (twitter-status-edit-update-length))
+
+(defun twitter-direct-message-edit-after-change (begin end old-size)
+  (twitter-direct-message-edit-update-length))
 
 (define-derived-mode twitter-status-edit-mode text-mode "Twitter Status Edit"
   "Major mode for updating your Twitter status."
@@ -1021,9 +1178,44 @@ character count on the mode line is updated."
   ;; Update the mode line immediatly
   (twitter-status-edit-update-length))
 
+(define-derived-mode twitter-direct-message-edit-mode text-mode "Twitter Direct Message Edit"
+  "Major mode for writing a Twitter direct message."
+  ;; Schedule to update the character count after altering the buffer
+  (make-local-variable 'after-change-functions)
+  (add-hook 'after-change-functions 'twitter-direct-message-edit-after-change)
+  ;; Add the remaining character count to the mode line
+  (make-local-variable 'twitter-direct-message-edit-remaining-length)
+  ;; Copy the mode line format list so we can safely edit it without
+  ;; affecting other buffers
+  (setq mode-line-format (copy-sequence mode-line-format))
+  ;; Add the remaining characters variable after the mode display
+  (let ((n mode-line-format))
+    (catch 'found
+      (while n
+	(when (eq 'mode-line-modes (car n))
+	  (setcdr n (cons 'twitter-direct-message-edit-remaining-length
+			  (cdr n)))
+	  (throw 'found nil))
+	(setq n (cdr n)))))
+  ;; Make a buffer-local reference to the overlay for overlong
+  ;; messages
+  (make-local-variable 'twitter-direct-message-edit-overlay)
+  ;; A buffer local variable for the reply id. This is filled in when
+  ;; the reply button is pressed
+  (make-local-variable 'twitter-direct-message-recipient)
+  (unless (boundp 'twitter-direct-message-recipient)
+    (setq twitter-direct-message-recipient (read-from-minibuffer (concat "Twitter username: "))))
+  (message "Direct message to %s" twitter-direct-message-recipient)
+  ;; Update the mode line immediatly
+  (twitter-status-edit-update-length))
+
 (define-derived-mode twitter-timeline-view-mode fundamental-mode
   "Twitter Timeline"
   "Major mode for viewing timelines from Twitter.")
+
+(define-derived-mode twitter-direct-message-view-mode fundamental-mode
+  "Twitter Direct Messages"
+  "Major mode for viewing direct messages in Twitter.")
 
 (provide 'twitter)
 
