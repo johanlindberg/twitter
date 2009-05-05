@@ -1128,7 +1128,7 @@ character count on the mode line is updated."
 	(if (null twitter-direct-message-edit-overlay)
 	    (overlay-put (setq twitter-direct-message-edit-overlay
 			       (make-overlay start (point-max)))
-			 'face 'twitter-status-overong-face)
+			 'face 'twitter-status-overlong-face)
 	  (move-overlay twitter-direct-message-edit-overlay
 			start (point-max))))
     ;; Buffer is not too long so just hide the overlay
