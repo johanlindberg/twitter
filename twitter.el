@@ -25,7 +25,7 @@
 ;; A Twitter client for emacs that can view your friends timeline and
 ;; publish new statuses.
 
-;;; Your should add the following to your Emacs configuration file:
+;;; You should add the following to your Emacs configuration file:
 
 ;; (autoload 'twitter-get-friends-timeline "twitter" nil t)
 ;; (autoload 'twitter-status-edit "twitter" nil t)
@@ -173,6 +173,20 @@ from Twitter will be displayed directly."
                  string
                  function)
   :group 'twitter)
+
+(defconst twitter-default-direct-message-format
+  (concat (propertize "From: %-20u %-38n"
+                      'face 'twitter-user-name-face)
+          (propertize " %r"
+                      'face 'twitter-header-face)
+          "\n"
+          (propertize "To:   %-20U %-19N"
+                      'face 'twitter-user-name-face)
+          (propertize " %24t"
+                      'face 'twitter-time-stamp-face)
+
+          "\n%M\n\n")
+  "Based on the default status format + screen names.")
 
 (defconst twitter-default-and-screennames-status-format
   (concat (propertize "%-20u %-19n"
@@ -335,7 +349,6 @@ twitter-password are set."
                              (concat twitter-username
                                      ":" twitter-password)))
                       (cdr server-cons))))))
-;  (message "%s %s %s" url cb cbargs)
   (url-retrieve url cb cbargs))
 
 (defun twitter-get-direct-messages ()
@@ -372,7 +385,7 @@ twitter-password are set."
       ;; Get a clean buffer to display the results
       (let ((buf (get-buffer-create "*Twitter direct messages*"))
             (compiled-format (twitter-compile-format-string
-                              twitter-status-format)))
+                              twitter-default-direct-message-format)))
         (with-current-buffer buf
           (let ((inhibit-read-only t))
             (erase-buffer)
@@ -725,6 +738,11 @@ returned list contains elements that are one of the following:
     (?P . protected))
   "Alist mapping format commands to XML nodes in the user element.")
 
+(defconst twitter-recipient-commands
+  '((?N . name)
+    (?U . screen_name))
+  "Alist mapping format commands to XML nodes in the user element.")
+
 (defun twitter-insert-status-part-for-command (status-node command)
   "Extract the string for COMMAND from STATUS-NODE and insert.
 The command should be integer representing one of the characters
@@ -812,7 +830,8 @@ twitter-compile-format-string."
   "Extract the string for COMMAND from DIRECT-MESSAGE-NODE and insert.
 The command should be integer representing one of the characters
 supported by twitter-direct-message-format."
-  (let ((sender-node (car (xml-get-children direct-message-node 'sender))))
+  (let ((sender-node (car (xml-get-children direct-message-node 'sender)))
+        (recipient-node (car (xml-get-children direct-message-node 'recipient))))
     (cond ((= command ?t)
            (let ((val (twitter-get-attrib-node direct-message-node 'created_at)))
              (when val
@@ -850,6 +869,9 @@ supported by twitter-direct-message-format."
              (cond ((setq elem (assoc command twitter-user-commands))
                     (setq val (twitter-get-attrib-node
                                sender-node (cdr elem))))
+                   ((setq elem (assoc command twitter-recipient-commands))
+                    (setq val (twitter-get-attrib-node
+                               recipient-node (cdr elem))))
                    ((setq elem (assoc command twitter-status-commands))
                     (setq val (twitter-get-attrib-node
                                direct-message-node (cdr elem)))))
@@ -880,7 +902,8 @@ supported by twitter-direct-message-format."
                 (goto-char (+ part-end (length padding))))))
           (add-text-properties part-start (point) properties)))
       (setq format (cdr format)))
-    (let ((sender-node (car (xml-get-children direct-message-node 'sender))))
+    (let ((sender-node (car (xml-get-children direct-message-node 'sender)))
+          (recipient-node (car (xml-get-children direct-message-node 'recipient))))
       (add-text-properties direct-message-begin (point)
                            `(twitter-sender-screen-name
                              ,(twitter-get-attrib-node sender-node 'screen_name)
