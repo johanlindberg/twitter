@@ -1,11 +1,33 @@
 This is a fork of git://git.busydoingnothing.co.uk/twitter.git
 
+For those of you who have taken the time to actually look at the code. I
+should mention that the fact that I'm duplicating code all over the place
+is actually a strategy.
+
+I'm using this project to learn more about GNU Emacs and Emacs Lisp but
+I don't want to, accidentally, mess up existing features. Once I'm done
+implementing new features I will refactor the code in an attempt to remove
+unneccessary duplication.
+
+My apologies to @bpeel.
+
+   /Johan
+
 TODO:
 1) User timeline view. DONE
+   C-c C-u loads a specific user's buffer. It defaults to user at point.
+   C-c C-r, C-c C-p and C-c C-c works as for Friends timeline
 2) Search.
-3) Pagination. DONE
+3) Pagination.
+   C-c <down> and C-c <up> loads the 20 next and previous messages
+   respectively.
+3.1) Friends timeline. DONE
+3.2) Direct Messages. DONE
+3.3) User timeline.
 4) Automatic refresh.
 5) Group (several, but not all, friends) timeline view.
 6) Visualize conversations.
-7) Getting direct messages. DONE
-8) Sending direct messages
+7) Direct messages. DONE
+   C-c C-d loads the DM buffer.
+   C-c C-r, C-c C-p and C-c C-c works as for Friends/User timeline but uses
+   Direct Messages instead.
